@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io/ioutil"
 	"log"
 	"os"
 	"testing"
@@ -43,6 +44,39 @@ func runTests(m *testing.M) int {
 	}()
 
 	return m.Run()
+}
+
+func TestDumpSchema(t *testing.T) {
+	ctx := context.Background()
+	db := env.GetMigratedDB(ctx, t)
+	sqlDump, err := env.DumpDatabaseSchema(ctx, db.Config().Config.Database)
+	if err != nil {
+		t.Fatalf("failed to dump database schema: %v", err)
+	}
+
+	diffFile(t, sqlDump, "golden/raw_dump.sql")
+}
+
+func TestDumpHumanReadableSchema(t *testing.T) {
+	ctx := context.Background()
+	db := env.GetMigratedDB(ctx, t)
+	sqlDump, err := env.DumpDatabaseSchema(ctx, db.Config().Config.Database, testpgx.WithHumanReadableSchema())
+	if err != nil {
+		t.Fatalf("failed to dump database schema: %v", err)
+	}
+
+	diffFile(t, sqlDump, "golden/simplified_dump.sql")
+}
+
+func diffFile(t *testing.T, got, wantFile string) {
+	want, err := ioutil.ReadFile(wantFile)
+	if err != nil {
+		t.Fatalf("failed to load golden file %q to diff against: %v", wantFile, err)
+	}
+
+	if diff := cmp.Diff(string(want), got); diff != "" {
+		t.Errorf("output didn't match golden file %q (-want +got)\n%s", wantFile, diff)
+	}
 }
 
 func TestSchemaHistory(t *testing.T) {
