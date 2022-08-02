@@ -151,9 +151,11 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		dbs:               make(chan *pgx.Conn, maxNumDbsPerPostgresInstance),
 	}
 
-	if _, err := env.waitForPostgresToBeReady(ctx, "" /* dbName */); err != nil {
+	conn, err := env.waitForPostgresToBeReady(ctx, "" /* dbName */)
+	if err != nil {
 		return nil, fmt.Errorf("waiting for container to be ready: %w", err)
 	}
+	defer conn.Close(ctx)
 
 	return env, nil
 }
@@ -161,9 +163,12 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 func (e *Env) GetMigratedDB(ctx context.Context, t testing.TB) *pgx.Conn {
 	conn, err := e.aquireMigratedDB(ctx)
 	if err != nil {
-		t.Fatalf("aquiring pool: %v", err)
+		t.Fatalf("acquiring pool: %v", err)
 	}
-	t.Cleanup(func() { e.freeConn(conn) })
+	t.Cleanup(func() {
+		e.truncateDB(ctx, conn)
+		e.freeConn(conn)
+	})
 	return conn
 }
 
@@ -175,6 +180,7 @@ func (e *Env) WithMigratedDB(ctx context.Context, fn func(*pgx.Conn) error) erro
 	if err := fn(conn); err != nil {
 		return fmt.Errorf("running fn: %w", err)
 	}
+	e.truncateDB(ctx, conn)
 	e.freeConn(conn)
 	return nil
 }
@@ -277,6 +283,7 @@ func (e *Env) dumpDatabaseSchema(ctx context.Context, dbName string) (string, er
 		"pg_dump",
 		"--schema-only",
 		"--username", e.dbUser,
+		"--dbname", dbName,
 	}
 
 	cmd := exec.CommandContext(ctx, e.opts.DockerBinaryPath, args...)
@@ -299,7 +306,7 @@ func (e *Env) TearDown(ctx context.Context) error {
 func (e *Env) aquireMigratedDB(ctx context.Context) (*pgx.Conn, error) {
 	err := e.createMigratedDBIfUnderCap(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("aquiring db conn: %w", err)
+		return nil, fmt.Errorf("acquiring db conn: %w", err)
 	}
 	conn := <-e.dbs
 	return conn, nil
@@ -321,8 +328,34 @@ func (e *Env) createMigratedDBIfUnderCap(ctx context.Context) error {
 	return nil
 }
 
-func (e *Env) freeConn(p *pgx.Conn) {
-	e.dbs <- p
+func (e *Env) truncateDB(ctx context.Context, conn *pgx.Conn) error {
+	listTablesQuery := `SELECT tablename FROM pg_catalog.pg_tables
+WHERE schemaname != 'information_schema' AND
+schemaname != 'pg_catalog';`
+	rows, err := conn.Query(ctx, listTablesQuery)
+	if err != nil {
+		return fmt.Errorf("failed to load table list: %w", err)
+	}
+	defer rows.Close()
+
+	var tableNames []string
+	for rows.Next() {
+		var tblName string
+		if err := rows.Scan(&tblName); err != nil {
+			return fmt.Errorf("failed to load table name: %w", err)
+		}
+		tableNames = append(tableNames, tblName)
+	}
+
+	truncQuery := `TRUNCATE TABLE ` + strings.Join(tableNames, ",") + ";"
+	if _, err := conn.Exec(ctx, truncQuery); err != nil {
+		return fmt.Errorf("failed to truncate all DB tables: %w", err)
+	}
+	return nil
+}
+
+func (e *Env) freeConn(conn *pgx.Conn) {
+	e.dbs <- conn
 }
 
 func createTestDBName() string {
@@ -405,10 +438,15 @@ func (e *Env) createDatabaseAndWaitForReady(ctx context.Context, dbName string) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get DB connection: %w", err)
 	}
+	defer conn.Close(ctx)
+
 	if _, err := conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s;", dbName)); err != nil {
 		return nil, fmt.Errorf("failed to create database %q: %w", dbName, err)
 	}
-	return conn, nil
+
+	// Now connect to the actual database, since we can't make the original `conn`
+	// connect to it, see https://stackoverflow.com/a/10338367.
+	return e.waitForPostgresToBeReady(ctx, dbName)
 }
 
 func simplifySchema(schema string, ms []modification) string {
