@@ -117,6 +117,10 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		return nil, fmt.Errorf("failed to change permissions on socket temp dir: %w", err)
 	}
 
+	if err := exec.CommandContext(ctx, o.DockerBinaryPath, "pull", o.PostgresDockerImage).Run(); err != nil {
+		return nil, fmt.Errorf("failed to pull postgres docker image %q: %w", o.PostgresDockerImage, err)
+	}
+
 	args := []string{
 		"run",
 		"--rm",
