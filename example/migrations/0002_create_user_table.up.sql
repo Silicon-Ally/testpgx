@@ -1,0 +1,9 @@
+BEGIN;
+
+CREATE TABLE users (
+    id INT GENERATED ALWAYS AS IDENTITY,
+    name TEXT NOT NULL,
+    PRIMARY KEY (id)
+);
+
+COMMIT;
