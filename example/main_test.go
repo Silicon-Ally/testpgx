@@ -34,7 +34,14 @@ func runTests(m *testing.M) int {
 		log.Fatalf("migrate.New: %v", err)
 	}
 
-	if env, err = testpgx.New(ctx, testpgx.WithMigrator(mgr)); err != nil {
+	opts := []testpgx.Option{
+		testpgx.WithMigrator(mgr),
+		// The default of 10 seems to consume too many resources on GitHub Actions and
+		// cause timeouts.
+		testpgx.WithMaxDBs(3),
+	}
+
+	if env, err = testpgx.New(ctx, opts...); err != nil {
 		log.Fatalf("failed to init the test env: %v", err)
 	}
 	defer func() {
