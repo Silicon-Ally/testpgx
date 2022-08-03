@@ -239,28 +239,6 @@ func (e *Env) WithMigratedDB(ctx context.Context, fn func(*pgx.Conn) error) erro
 	return nil
 }
 
-type RemoveFunc func() error
-
-func (e *Env) makeTempPasswordFile() (string, RemoveFunc, error) {
-	f, err := ioutil.TempFile(e.dbSocketDir, "pgpassfile-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp password file: %w", err)
-	}
-	defer f.Close()
-	fn := f.Name()
-
-	if _, err := io.WriteString(f, e.dbPassword); err != nil {
-		return "", nil, fmt.Errorf("failed to write test DB password to file: %w", err)
-	}
-
-	if err := f.Close(); err != nil {
-		return "", nil, fmt.Errorf("failed to close test DB password file: %w", err)
-	}
-
-	removeFn := func() error { return os.Remove(fn) }
-	return fn, removeFn, nil
-}
-
 type modification struct {
 	name string
 	fn   func(string) string
@@ -376,6 +354,8 @@ func (e *Env) createMigratedDB(ctx context.Context) (*TestDB, error) {
 	return tdb, nil
 }
 
+// See comment on truncateDB for more info.
+//nolint:unused
 func resetSequences(ctx context.Context, conn *pgx.Conn) error {
 	listSequencesQuery := `SELECT c.relname FROM pg_class c WHERE c.relkind = 'S';`
 	rows, err := conn.Query(ctx, listSequencesQuery)
