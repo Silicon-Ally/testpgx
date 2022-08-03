@@ -76,7 +76,6 @@ type StepMigrator interface {
 }
 
 const (
-	testDbHost = "0.0.0.0"
 	testDBUser = "postgres"
 	testDBPass = "anypassword"
 
@@ -415,6 +414,7 @@ func resetSequences(ctx context.Context, conn *pgx.Conn) error {
 // truncateDB does a best-effort removal of all the data in the database,
 // without deleting any of the schema. It isn't currently used, see comments on
 // (*TestDB).close for more information.
+//nolint:unused
 func (e *Env) truncateDB(ctx context.Context, conn *pgx.Conn) error {
 	if err := resetSequences(ctx, conn); err != nil {
 		return fmt.Errorf("failed to list sequences: %v", err)
@@ -565,27 +565,27 @@ func addCustomDisclaimer(disclaimer string) func(string) string {
 }
 
 func indentAtBeginningOfLine(in string) string {
-	r := regexp.MustCompile("\\n ")
+	r := regexp.MustCompile(`\n `)
 	return r.ReplaceAllString(in, "\n    ")
 }
 
 func addExtraNewlineBeforeCreateTableStatements(in string) string {
-	r := regexp.MustCompile("\\nCREATE TABLE")
+	r := regexp.MustCompile(`\nCREATE TABLE`)
 	return r.ReplaceAllString(in, "\n\n\nCREATE TABLE")
 }
 
 func removeNewlineMidAlter(in string) string {
-	r := regexp.MustCompile("([^;,\\()])\\n")
+	r := regexp.MustCompile(`([^;,\(\)])\n`)
 	return r.ReplaceAllString(in, "$1")
 }
 
 func removeOwnershipCommands(in string) string {
-	r := regexp.MustCompile("ALTER (TABLE|TYPE|FUNCTION|SEQUENCE) [^ ]+ OWNER TO postgres;")
+	r := regexp.MustCompile(`ALTER (TABLE|TYPE|FUNCTION|SEQUENCE) [^ ]+ OWNER TO postgres;`)
 	return r.ReplaceAllString(in, "")
 }
 
 func removeComments(in string) string {
-	r := regexp.MustCompile("\\n--[^\\n]*")
+	r := regexp.MustCompile(`\n--[^\n]*`)
 	return r.ReplaceAllString(in, "")
 }
 
@@ -595,7 +595,7 @@ func removeRepeatedSpaces(in string) string {
 }
 
 func removeRepeatedNewlines(in string) string {
-	r := regexp.MustCompile("\\n+")
+	r := regexp.MustCompile(`\n+`)
 	return r.ReplaceAllString(in, "\n")
 }
 
@@ -605,12 +605,12 @@ func removeSchemaMigrationInfo(in string) string {
 }
 
 func removePublicPrefix(in string) string {
-	r := regexp.MustCompile("public\\.")
+	r := regexp.MustCompile(`public\.`)
 	return r.ReplaceAllString(in, " ")
 }
 
 func sortByTableAndRemoveNonTableStatements(in string) string {
-	tableRegexp := regexp.MustCompile("public\\.[a-z_]*")
+	tableRegexp := regexp.MustCompile(`public\.[a-z_]*`)
 	statements := strings.Split(in, ";")
 
 	tableStatements := make(map[string][]string)
