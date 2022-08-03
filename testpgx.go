@@ -55,7 +55,7 @@ func (tdb *TestDB) close(ctx context.Context) error {
 
 type Env struct {
 	postgresCid string
-	opts        *Options
+	opts        *options
 	canCreateDB chan struct{}
 	conn        *pgxpool.Pool
 
@@ -82,61 +82,65 @@ const (
 	defaultMaxDBs        = 10
 )
 
-type Options struct {
-	// PostgresDockerImage is the Docker image to use for running PostgreSQL, e.g.
-	// 'postgres:14.4'
-	PostgresDockerImage string
-	// DockerBinaryPath is the path to the local Docker binary. If blank, looks
-	// in $PATH.
-	DockerBinaryPath string
-	Migrator         Migrator
-	// MaxDBs controls the number of DBs, which corresponds to the number of
-	// parallel executions. Test errors can occur if there are too many DBs created
-	// (because of memory limits)
-	MaxDBs int
+type options struct {
+	postgresDockerImage string
+	dockerBinaryPath    string
+	migrator            Migrator
+	maxDBs              int
 }
 
-type Option func(*Options)
+// Option allows configuring the test environment created by testpgx.
+type Option func(*options)
 
+// WithPostgresDockerImage csets the Docker image to use for running
+// PostgreSQL. It defaults to 'postgres:14.4'
 func WithPostgresDockerImage(img string) Option {
-	return func(o *Options) {
-		o.PostgresDockerImage = img
+	return func(o *options) {
+		o.postgresDockerImage = img
 	}
 }
 
+// WithDockerBinaryPath sets the path to the local Docker binary. If blank, the
+// default is to look in $PATH for the executable.
 func WithDockerBinaryPath(p string) Option {
-	return func(o *Options) {
-		o.DockerBinaryPath = p
+	return func(o *options) {
+		o.dockerBinaryPath = p
 	}
 }
 
+// WithMigrator allows specifing a migration system to populate the database
+// schema. If not specified, the database will be empty (e.g. have no tables
+// or anything).
 func WithMigrator(m Migrator) Option {
-	return func(o *Options) {
-		o.Migrator = m
+	return func(o *options) {
+		o.migrator = m
 	}
 }
 
+// WithMaxDBs controls the number of DBs, which corresponds to the number of
+// parallel executions. Test errors can occur if there are too many DBs created
+// (because of memory limits). Defaults to 10.
 func WithMaxDBs(n int) Option {
-	return func(o *Options) {
-		o.MaxDBs = n
+	return func(o *options) {
+		o.maxDBs = n
 	}
 }
 
 func New(ctx context.Context, opts ...Option) (*Env, error) {
-	o := &Options{
-		PostgresDockerImage: defaultPostgresImage,
-		MaxDBs:              defaultMaxDBs,
+	o := &options{
+		postgresDockerImage: defaultPostgresImage,
+		maxDBs:              defaultMaxDBs,
 	}
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	if o.DockerBinaryPath == "" {
+	if o.dockerBinaryPath == "" {
 		p, err := exec.LookPath("docker")
 		if err != nil {
 			return nil, fmt.Errorf("error looking for 'docker' binary in path: %w", err)
 		}
-		o.DockerBinaryPath = p
+		o.dockerBinaryPath = p
 	}
 
 	tmpDir, err := ioutil.TempDir("", "testpgx-*")
@@ -152,8 +156,8 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		return nil, fmt.Errorf("failed to change permissions on socket temp dir: %w", err)
 	}
 
-	if err := exec.CommandContext(ctx, o.DockerBinaryPath, "pull", o.PostgresDockerImage).Run(); err != nil {
-		return nil, fmt.Errorf("failed to pull postgres docker image %q: %w", o.PostgresDockerImage, err)
+	if err := exec.CommandContext(ctx, o.dockerBinaryPath, "pull", o.postgresDockerImage).Run(); err != nil {
+		return nil, fmt.Errorf("failed to pull postgres docker image %q: %w", o.postgresDockerImage, err)
 	}
 
 	args := []string{
@@ -162,9 +166,9 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		"--detach",
 		"--env", "POSTGRES_PASSWORD=" + testDBPass,
 		"--volume", socketDir + ":/var/run/postgresql",
-		o.PostgresDockerImage, "-c", "listen_addresses=",
+		o.postgresDockerImage, "-c", "listen_addresses=",
 	}
-	cmd := exec.CommandContext(ctx, o.DockerBinaryPath, args...)
+	cmd := exec.CommandContext(ctx, o.dockerBinaryPath, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -178,7 +182,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 
 	env := &Env{
 		postgresCid: cID,
-		canCreateDB: make(chan struct{}, o.MaxDBs),
+		canCreateDB: make(chan struct{}, o.maxDBs),
 		dbUser:      testDBUser,
 		dbPassword:  testDBPass,
 		dbSocketDir: socketDir,
@@ -186,7 +190,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 	}
 
 	// Fill the channel with tokens.
-	for i := 0; i < o.MaxDBs; i++ {
+	for i := 0; i < o.maxDBs; i++ {
 		env.canCreateDB <- struct{}{}
 	}
 
@@ -317,7 +321,7 @@ func (e *Env) dumpDatabaseSchema(ctx context.Context, dbName string) (string, er
 		"--dbname", dbName,
 	}
 
-	cmd := exec.CommandContext(ctx, e.opts.DockerBinaryPath, args...)
+	cmd := exec.CommandContext(ctx, e.opts.dockerBinaryPath, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("when getting db schema for %q: %w: %s", dbName, err, string(out))
@@ -328,7 +332,7 @@ func (e *Env) dumpDatabaseSchema(ctx context.Context, dbName string) (string, er
 func (e *Env) TearDown(ctx context.Context) error {
 	e.conn.Close()
 	if e.postgresCid != "" {
-		if err := exec.CommandContext(ctx, e.opts.DockerBinaryPath, "kill", e.postgresCid).Run(); err != nil {
+		if err := exec.CommandContext(ctx, e.opts.dockerBinaryPath, "kill", e.postgresCid).Run(); err != nil {
 			return fmt.Errorf("failed to kill Postgres docker container: %w", err)
 		}
 	}
@@ -342,11 +346,11 @@ func (e *Env) createMigratedDB(ctx context.Context) (*TestDB, error) {
 		return nil, fmt.Errorf("failed to create DB: %w", err)
 	}
 
-	if e.opts.Migrator == nil {
+	if e.opts.migrator == nil {
 		return nil, errors.New("a migrated DB was requested, but no migrator was given")
 	}
 
-	if err := e.opts.Migrator.Migrate(connToDB(tdb.conn)); err != nil {
+	if err := e.opts.migrator.Migrate(connToDB(tdb.conn)); err != nil {
 		return nil, fmt.Errorf("an error occurred while applying migrations: %w", err)
 	}
 
