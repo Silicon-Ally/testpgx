@@ -155,6 +155,10 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 	if err := os.Chmod(tmpDir, 0766); err != nil {
 		return nil, fmt.Errorf("failed to change permissions on socket temp dir: %w", err)
 	}
+	// Docker doesn't require the mount exist, but Podman does.
+	if err := os.Mkdir(socketDir, 0766); err != nil {
+		return nil, fmt.Errorf("failed to create socket sub temp dir: %w", err)
+	}
 
 	if err := exec.CommandContext(ctx, o.dockerBinaryPath, "pull", o.postgresDockerImage).Run(); err != nil {
 		return nil, fmt.Errorf("failed to pull postgres docker image %q: %w", o.postgresDockerImage, err)
@@ -172,7 +176,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("while starting postgres: %w", err)
+		return nil, fmt.Errorf("while starting postgres: %w\n%s", err, string(out))
 	}
 
 	cID, err := getPostgresContainerID(out)
