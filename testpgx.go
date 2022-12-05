@@ -1,6 +1,7 @@
 package testpgx
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -19,8 +20,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-multierror"
 	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
 
+	"github.com/jackc/pgx/v4/pgxpool"
 	pgxstdlib "github.com/jackc/pgx/v4/stdlib"
 )
 
@@ -78,7 +79,7 @@ const (
 	testDBUser = "postgres"
 	testDBPass = "anypassword"
 
-	defaultPostgresImage = "postgres:14.4"
+	defaultPostgresImage = "postgres:14.6"
 	defaultMaxDBs        = 10
 )
 
@@ -180,6 +181,31 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		return nil, fmt.Errorf("when getting postgres cid: %w", err)
 	}
 
+	// Postgres starts up twice, first as an initialization phase, and then for
+	// real. See this thread [1] for more info.
+	// [1] https://github.com/docker-library/postgres/issues/146
+	pgLogCtx, pgLogDone := context.WithCancel(ctx)
+	defer pgLogDone()
+	pgLogCmd := exec.CommandContext(pgLogCtx, o.dockerBinaryPath, "logs", "-f", cID)
+	pgLogs, err := pgLogCmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stdout pipe for docker logs: %w", err)
+	}
+	if err := pgLogCmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start docker logs: %w", err)
+	}
+	initDone := make(chan struct{})
+	go func() {
+		sc := bufio.NewScanner(pgLogs)
+		for sc.Scan() {
+			if strings.Contains(sc.Text(), "PostgreSQL init process complete; ready for start up.") {
+				break
+			}
+		}
+		close(initDone)
+		pgLogDone()
+	}()
+
 	env := &Env{
 		postgresCid: cID,
 		canCreateDB: make(chan struct{}, o.maxDBs),
@@ -195,6 +221,10 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 	}
 
 	err = waitForPostgresToBeReady(ctx, func(ctx context.Context) error {
+		// Don't try to connect until initialization is done. Postgres starts up twice
+		// in Docker, the first is just an initialization.
+		<-initDone
+
 		pool, err := pgxpool.Connect(ctx, env.dsn("" /* dbName */))
 		if err != nil {
 			return fmt.Errorf("failed to connect to database instance: %w", err)
