@@ -56,7 +56,7 @@ func runTests(m *testing.M) int {
 func TestDumpSchema(t *testing.T) {
 	ctx := context.Background()
 	db := env.GetMigratedDB(ctx, t)
-	sqlDump, err := env.DumpDatabaseSchema(ctx, db.Config().Config.Database)
+	sqlDump, err := env.DumpDatabaseSchema(ctx, db.Config().ConnConfig.Database)
 	if err != nil {
 		t.Fatalf("failed to dump database schema: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestDumpSchema(t *testing.T) {
 func TestDumpHumanReadableSchema(t *testing.T) {
 	ctx := context.Background()
 	db := env.GetMigratedDB(ctx, t)
-	sqlDump, err := env.DumpDatabaseSchema(ctx, db.Config().Config.Database, testpgx.WithHumanReadableSchema())
+	sqlDump, err := env.DumpDatabaseSchema(ctx, db.Config().ConnConfig.Database, testpgx.WithHumanReadableSchema())
 	if err != nil {
 		t.Fatalf("failed to dump database schema: %v", err)
 	}
