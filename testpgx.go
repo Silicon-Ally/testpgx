@@ -27,18 +27,16 @@ import (
 
 type TestDB struct {
 	name string
-	conn *pgx.Conn
+	conn *pgxpool.Pool
 	e    *Env
 
-	once *sync.Once
+	once sync.Once
 }
 
 func (tdb *TestDB) close(ctx context.Context) error {
 	var rErr error
 	tdb.once.Do(func() {
-		if err := tdb.conn.Close(ctx); err != nil {
-			rErr = multierror.Append(rErr, fmt.Errorf("failed to close connection to DB %q: %w", tdb.name, err))
-		}
+		tdb.conn.Close()
 		// We opt to drop/re-create databases instead of truncating tables because its
 		// just too messy. Even clearing all the data may not be desireable for something
 		// like a migration-tracking table. Plus, there's sequences and triggers and all
@@ -242,7 +240,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 	return env, nil
 }
 
-func (e *Env) GetMigratedDB(ctx context.Context, t testing.TB) *pgx.Conn {
+func (e *Env) GetMigratedDB(ctx context.Context, t testing.TB) *pgxpool.Pool {
 	db, err := e.createMigratedDB(ctx)
 	if err != nil {
 		t.Fatalf("acquiring pool: %v", err)
@@ -255,7 +253,7 @@ func (e *Env) GetMigratedDB(ctx context.Context, t testing.TB) *pgx.Conn {
 	return db.conn
 }
 
-func (e *Env) WithMigratedDB(ctx context.Context, fn func(*pgx.Conn) error) error {
+func (e *Env) WithMigratedDB(ctx context.Context, fn func(*pgxpool.Pool) error) error {
 	tdb, err := e.createMigratedDB(ctx)
 	defer tdb.close(ctx) // Best effort close in the event of a failure.
 
@@ -380,8 +378,14 @@ func (e *Env) createMigratedDB(ctx context.Context) (*TestDB, error) {
 		return nil, errors.New("a migrated DB was requested, but no migrator was given")
 	}
 
-	if err := e.opts.migrator.Migrate(connToDB(tdb.conn)); err != nil {
-		return nil, fmt.Errorf("an error occurred while applying migrations: %w", err)
+	err = tdb.conn.AcquireFunc(ctx, func(conn *pgxpool.Conn) error {
+		if err := e.opts.migrator.Migrate(connToDB(conn)); err != nil {
+			return fmt.Errorf("an error occurred while applying migrations: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return tdb, nil
@@ -472,8 +476,8 @@ func (e *Env) CreateDB(ctx context.Context) (*TestDB, error) {
 	return tdb, nil
 }
 
-func connToDB(conn *pgx.Conn) *sql.DB {
-	return pgxstdlib.OpenDB(*conn.Config())
+func connToDB(conn *pgxpool.Conn) *sql.DB {
+	return pgxstdlib.OpenDB(*conn.Conn().Config())
 }
 
 func getPostgresContainerID(upOutput []byte) (string, error) {
@@ -485,7 +489,7 @@ func getPostgresContainerID(upOutput []byte) (string, error) {
 }
 
 func (e *Env) dsn(dbName string) string {
-	dsn := fmt.Sprintf("user=%s password=%s host=%s sslmode=disable", e.dbUser, e.dbPassword, e.dbSocketDir)
+	dsn := fmt.Sprintf("user=%s password=%s host=%s sslmode=disable pool_max_conns=20", e.dbUser, e.dbPassword, e.dbSocketDir)
 	if dbName != "" {
 		dsn += " dbname=" + dbName
 	}
@@ -524,9 +528,9 @@ func (e *Env) createDatabaseAndWaitForReady(ctx context.Context, dbName string) 
 
 	// Now connect to the actual database, since we can't make the original `conn`
 	// connect to it, see https://stackoverflow.com/a/10338367.
-	var pgxConn *pgx.Conn
+	var pgxConn *pgxpool.Pool
 	cFn := func(ctx context.Context) error {
-		conn, err := pgx.Connect(ctx, e.dsn(dbName))
+		conn, err := pgxpool.Connect(ctx, e.dsn(dbName))
 		if err != nil {
 			return fmt.Errorf("failed to connect to database %q: %w", dbName, err)
 		}
@@ -549,7 +553,6 @@ func (e *Env) createDatabaseAndWaitForReady(ctx context.Context, dbName string) 
 		name: dbName,
 		conn: pgxConn,
 		e:    e,
-		once: &sync.Once{},
 	}, nil
 }
 
