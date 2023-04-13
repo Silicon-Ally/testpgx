@@ -23,3 +23,7 @@ running in a Docker container, though this can be converted into a more generic
 
 See [the `example/` directory](/example/) for an example of how to integrate
 `testpgx` into a test suite.
+
+## Contributing
+
+Contribution guidelines can be found [on our website](https://siliconally.org/oss/contributor-guidelines).
