@@ -34,6 +34,9 @@ type TestDB struct {
 }
 
 func (tdb *TestDB) close(ctx context.Context) error {
+	if tdb == nil {
+		return errors.New("testdb was nil for close")
+	}
 	var rErr error
 	tdb.once.Do(func() {
 		tdb.conn.Close()
@@ -247,7 +250,7 @@ func (e *Env) GetMigratedDB(ctx context.Context, t testing.TB) *pgxpool.Pool {
 	}
 	t.Cleanup(func() {
 		if err := db.close(ctx); err != nil {
-			t.Logf("error cleaning up DB: %v", err)
+			t.Errorf("error cleaning up DB: %v", err)
 		}
 	})
 	return db.conn
@@ -255,11 +258,10 @@ func (e *Env) GetMigratedDB(ctx context.Context, t testing.TB) *pgxpool.Pool {
 
 func (e *Env) WithMigratedDB(ctx context.Context, fn func(*pgxpool.Pool) error) error {
 	tdb, err := e.createMigratedDB(ctx)
-	defer tdb.close(ctx) // Best effort close in the event of a failure.
-
 	if err != nil {
 		return fmt.Errorf("aquiring pool: %v", err)
 	}
+	defer tdb.close(ctx) // Best effort close in the event of a failure.
 	if err := fn(tdb.conn); err != nil {
 		return fmt.Errorf("running fn: %w", err)
 	}
@@ -392,6 +394,7 @@ func (e *Env) createMigratedDB(ctx context.Context) (*TestDB, error) {
 }
 
 // See comment on truncateDB for more info.
+//
 //nolint:unused
 func resetSequences(ctx context.Context, conn *pgx.Conn) error {
 	listSequencesQuery := `SELECT c.relname FROM pg_class c WHERE c.relkind = 'S';`
@@ -431,6 +434,7 @@ func resetSequences(ctx context.Context, conn *pgx.Conn) error {
 // truncateDB does a best-effort removal of all the data in the database,
 // without deleting any of the schema. It isn't currently used, see comments on
 // (*TestDB).close for more information.
+//
 //nolint:unused
 func (e *Env) truncateDB(ctx context.Context, conn *pgx.Conn) error {
 	if err := resetSequences(ctx, conn); err != nil {
