@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,10 +18,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-multierror"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 
-	"github.com/jackc/pgx/v4/pgxpool"
-	pgxstdlib "github.com/jackc/pgx/v4/stdlib"
+	"github.com/jackc/pgx/v5/pgxpool"
+	pgxstdlib "github.com/jackc/pgx/v5/stdlib"
 )
 
 type TestDB struct {
@@ -145,7 +144,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		o.dockerBinaryPath = p
 	}
 
-	tmpDir, err := ioutil.TempDir("", "testpgx-*")
+	tmpDir, err := os.MkdirTemp("", "testpgx-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create socket temp dir: %w", err)
 	}
@@ -226,7 +225,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		// in Docker, the first is just an initialization.
 		<-initDone
 
-		pool, err := pgxpool.Connect(ctx, env.dsn("" /* dbName */))
+		pool, err := pgxpool.New(ctx, env.dsn("" /* dbName */))
 		if err != nil {
 			return fmt.Errorf("failed to connect to database instance: %w", err)
 		}
@@ -534,7 +533,7 @@ func (e *Env) createDatabaseAndWaitForReady(ctx context.Context, dbName string) 
 	// connect to it, see https://stackoverflow.com/a/10338367.
 	var pgxConn *pgxpool.Pool
 	cFn := func(ctx context.Context) error {
-		conn, err := pgxpool.Connect(ctx, e.dsn(dbName))
+		conn, err := pgxpool.New(ctx, e.dsn(dbName))
 		if err != nil {
 			return fmt.Errorf("failed to connect to database %q: %w", dbName, err)
 		}

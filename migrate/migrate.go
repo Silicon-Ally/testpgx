@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/pgx"
+	"github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/hashicorp/go-multierror"
 
 	_ "github.com/golang-migrate/migrate/v4/source/file"
