@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io/ioutil"
 	"log"
 	"os"
 	"testing"
@@ -76,7 +75,7 @@ func TestDumpHumanReadableSchema(t *testing.T) {
 }
 
 func diffFile(t *testing.T, got, wantFile string) {
-	want, err := ioutil.ReadFile(wantFile)
+	want, err := os.ReadFile(wantFile)
 	if err != nil {
 		t.Fatalf("failed to load golden file %q to diff against: %v", wantFile, err)
 	}

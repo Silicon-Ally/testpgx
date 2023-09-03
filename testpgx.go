@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,7 +144,7 @@ func New(ctx context.Context, opts ...Option) (*Env, error) {
 		o.dockerBinaryPath = p
 	}
 
-	tmpDir, err := ioutil.TempDir("", "testpgx-*")
+	tmpDir, err := os.MkdirTemp("", "testpgx-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create socket temp dir: %w", err)
 	}
